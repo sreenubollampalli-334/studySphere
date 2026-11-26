@@ -1,0 +1,37 @@
+{$STUDYSPHERE_SITE} {
+    log {
+        format filter {
+            wrap json
+            fields {
+                request>uri delete
+                request>headers delete
+                resp_headers delete
+            }
+        }
+    }
+
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+    }
+
+    @backend path /api/* /ws/* /actuator/health
+    handle @backend {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    @private_actuator {
+        path /actuator/*
+        not path /actuator/health
+    }
+    handle @private_actuator {
+        respond 404
+    }
+
+    handle {
+        root * /srv/studysphere/current/web
+        try_files {path} /index.html
+        file_server
+    }
+}

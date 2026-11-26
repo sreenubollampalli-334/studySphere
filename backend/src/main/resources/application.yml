@@ -1,0 +1,82 @@
+spring:
+  ai:
+    model:
+      chat: "${STUDYSPHERE_AI_PROVIDER:none}"
+      embedding: "${STUDYSPHERE_EMBEDDING_PROVIDER:none}"
+      image: none
+      moderation: none
+      audio:
+        speech: none
+        transcription: none
+    openai:
+      api-key: "${STUDYSPHERE_OPENAI_API_KEY:}"
+      chat:
+        model: "${STUDYSPHERE_OPENAI_MODEL:gpt-4o-mini}"
+        max-tokens: 800
+        temperature: 0.4
+        store: false
+    google:
+      genai:
+        api-key: "${STUDYSPHERE_GEMINI_API_KEY:}"
+        chat:
+          model: "${STUDYSPHERE_GEMINI_MODEL:gemini-3.5-flash-lite}"
+          max-output-tokens: 800
+          temperature: 0.4
+  application:
+    name: studysphere
+  config:
+    import: "optional:file:.env[.properties]"
+  datasource:
+    url: "jdbc:mysql://127.0.0.1:${STUDYSPHERE_DB_PORT:3306}/${STUDYSPHERE_DB_NAME:studysphere}?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true"
+    username: "${STUDYSPHERE_DB_USER:studysphere}"
+    password: "${STUDYSPHERE_DB_PASSWORD}"
+  flyway:
+    clean-disabled: true
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 21MB
+  mail:
+    host: "${STUDYSPHERE_SMTP_HOST:127.0.0.1}"
+    port: "${STUDYSPHERE_SMTP_PORT:1025}"
+    username: "${STUDYSPHERE_SMTP_USER:}"
+    password: "${STUDYSPHERE_SMTP_PASSWORD:}"
+    properties:
+      "[mail.smtp.auth]": "${STUDYSPHERE_SMTP_AUTH:false}"
+      "[mail.smtp.starttls.enable]": "${STUDYSPHERE_SMTP_STARTTLS:false}"
+      "[mail.smtp.starttls.required]": "${STUDYSPHERE_SMTP_STARTTLS:false}"
+      "[mail.smtp.connectiontimeout]": 3000
+      "[mail.smtp.timeout]": 3000
+      "[mail.smtp.writetimeout]": 3000
+
+management:
+  health:
+    mail:
+      enabled: false
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: never
+      show-components: never
+      probes:
+        enabled: false
+
+studysphere:
+  documents:
+    qdrant-url: "${STUDYSPHERE_QDRANT_URL:http://127.0.0.1:6333}"
+    qdrant-key: "${STUDYSPHERE_QDRANT_API_KEY:}"
+    collection: "${STUDYSPHERE_QDRANT_COLLECTION:studysphere_documents}"
+  storage:
+    provider: "${STUDYSPHERE_STORAGE_PROVIDER:filesystem}"
+    directory: "${STUDYSPHERE_STORAGE_DIRECTORY:./var/resources}"
+    bucket: "${STUDYSPHERE_STORAGE_BUCKET:}"
+    region: "${STUDYSPHERE_STORAGE_REGION:us-east-1}"
+    endpoint: "${STUDYSPHERE_STORAGE_ENDPOINT:}"
+    path-style: "${STUDYSPHERE_STORAGE_PATH_STYLE:false}"
+  auth:
+    secure-cookies: "${STUDYSPHERE_AUTH_SECURE_COOKIES:true}"
+    frontend-origin: "${STUDYSPHERE_FRONTEND_ORIGIN:http://localhost:5173}"
+    mail-from: "${STUDYSPHERE_MAIL_FROM:studysphere@localhost.test}"

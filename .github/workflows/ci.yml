@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: frontend/.nvmrc
+      - name: Prepare native MySQL test schema
+        env:
+          MYSQL_PWD: root
+        run: |
+          sudo systemctl start mysql.service
+          password=$(openssl rand -hex 24)
+          echo "::add-mask::$password"
+          MYSQL_TEST_LOGIN_FILE="$RUNNER_TEMP/studysphere-absent-login.cnf" mysql --protocol=socket --user=root <<SQL
+          CREATE DATABASE studysphere_ci CHARACTER SET utf8mb4;
+          CREATE USER 'studysphere_ci'@'127.0.0.1' IDENTIFIED BY '$password';
+          GRANT ALL PRIVILEGES ON studysphere_ci.* TO 'studysphere_ci'@'127.0.0.1';
+          GRANT ALL PRIVILEGES ON studysphere_restore_ci.* TO 'studysphere_ci'@'127.0.0.1';
+          SQL
+          {
+            echo 'STUDYSPHERE_TEST_DB_URL=jdbc:mysql://127.0.0.1:3306/studysphere_ci'
+            echo 'STUDYSPHERE_TEST_DB_USER=studysphere_ci'
+            echo "STUDYSPHERE_TEST_DB_PASSWORD=$password"
+          } >> "$GITHUB_ENV"
+      - run: mvn -B -ntp verify
+      - name: Rehearse snapshot, restore, and packaged backend
+        run: |
+          set -euo pipefail
+          work=$(mktemp -d)
+          jar=(target/studysphere-backend-*.jar)
+          backend_pid=''
+          trap 'if [[ -n "$backend_pid" ]]; then kill "$backend_pid" 2>/dev/null || true; fi; rm -rf -- "$work"' EXIT
+          start_backend() {
+            STUDYSPHERE_DB_NAME="$1" STUDYSPHERE_DB_USER="$STUDYSPHERE_TEST_DB_USER" \
+              STUDYSPHERE_DB_PASSWORD="$STUDYSPHERE_TEST_DB_PASSWORD" \
+              java -jar "${jar[0]}" --server.address=127.0.0.1 --server.port=18080 > "$work/backend.log" 2>&1 &
+            backend_pid=$!
+            for attempt in {1..60}; do
+              if curl -fsS http://127.0.0.1:18080/actuator/health | jq -e '.status == "UP"' >/dev/null; then
+                return
+              fi
+              kill -0 "$backend_pid" || break
+              sleep 1
+            done
+            cat "$work/backend.log" >&2
+            return 1
+          }
+          start_backend studysphere_ci
+          kill "$backend_pid"
+          wait "$backend_pid" || true
+          backend_pid=''
+
+          export MYSQL_USER="$STUDYSPHERE_TEST_DB_USER"
+          export MYSQL_PWD="$STUDYSPHERE_TEST_DB_PASSWORD"
+          mkdir "$work/resources"
+          printf 'StudySphere resource rehearsal\n' > "$work/resources/fixture.txt"
+          bash ../ops/data-snapshot.sh backup studysphere_ci "$work/snapshot" "$work/resources"
+          bash ../ops/data-snapshot.sh restore studysphere_restore_ci "$work/snapshot" "$work/restored"
+          cmp "$work/resources/fixture.txt" "$work/restored/fixture.txt"
+          source_migrations=$(mysql -h 127.0.0.1 -u "$MYSQL_USER" -Nse 'SELECT COUNT(*) FROM studysphere_ci.flyway_schema_history WHERE success')
+          restored_migrations=$(mysql -h 127.0.0.1 -u "$MYSQL_USER" -Nse 'SELECT COUNT(*) FROM studysphere_restore_ci.flyway_schema_history WHERE success')
+          test "$source_migrations" -gt 0
+          test "$source_migrations" = "$restored_migrations"
+          unset MYSQL_PWD
+          start_backend studysphere_restore_ci
+          node ../ops/load-smoke.mjs http://127.0.0.1:18080
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-build
+          path: backend/target/studysphere-backend-*.jar
+          if-no-files-found: error
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: frontend/package.json
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: node ops/scan-secrets.mjs
+        working-directory: .
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+      - if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/dist
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [backend, frontend]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: frontend/.nvmrc
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-build
+          path: backend/target
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: frontend/dist
+      - run: bash ops/package-release.sh release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: studysphere-native
+          path: release/
+          if-no-files-found: error

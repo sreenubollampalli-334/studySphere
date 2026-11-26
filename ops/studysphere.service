@@ -1,0 +1,23 @@
+[Unit]
+Description=StudySphere backend
+After=network-online.target mysql.service
+Wants=network-online.target
+
+[Service]
+User=studysphere
+Group=studysphere
+WorkingDirectory=/var/lib/studysphere
+EnvironmentFile=/etc/studysphere/backend.env
+ExecStart=/usr/bin/java -jar /srv/studysphere/current/studysphere.jar --server.address=127.0.0.1 --server.port=8080
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=45s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+StateDirectory=studysphere
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
